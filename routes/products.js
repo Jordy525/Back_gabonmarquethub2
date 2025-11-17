@@ -703,4 +703,107 @@ router.post('/:id/images', upload.array('images', 10), authenticateToken, requir
     }
 });
 
+// Route pour supprimer une image d'un produit
+router.delete('/:id/images/:imageId', authenticateToken, requireRole([2]), async (req, res) => {
+    const connection = await db.getConnection();
+
+    try {
+        await connection.beginTransaction();
+
+        const { id: productId, imageId } = req.params;
+
+        // Vérifier que le produit appartient au fournisseur
+        const [entreprises] = await connection.execute(
+            'SELECT id FROM entreprises WHERE utilisateur_id = ?',
+            [req.user.id]
+        );
+
+        if (entreprises.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({ error: 'Profil entreprise non trouvé' });
+        }
+
+        const [produits] = await connection.execute(
+            'SELECT id FROM produits WHERE id = ? AND fournisseur_id = ?',
+            [productId, entreprises[0].id]
+        );
+
+        if (produits.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Produit non trouvé ou vous n\'avez pas les droits' });
+        }
+
+        // Vérifier que l'image existe et appartient au produit
+        const [images] = await connection.execute(
+            'SELECT url FROM images_produits WHERE id = ? AND produit_id = ?',
+            [imageId, productId]
+        );
+
+        if (images.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ error: 'Image non trouvée' });
+        }
+
+        const imageUrl = images[0].url;
+
+        // Supprimer le fichier du disque s'il existe
+        if (imageUrl) {
+            const filePath = path.join(__dirname, '..', imageUrl);
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                    console.log('🗑️ Fichier supprimé:', filePath);
+                } catch (error) {
+                    console.warn('⚠️ Impossible de supprimer le fichier:', filePath, error.message);
+                }
+            }
+        }
+
+        // Supprimer l'image de la base de données
+        await connection.execute(
+            'DELETE FROM images_produits WHERE id = ?',
+            [imageId]
+        );
+
+        // Si c'était l'image principale, marquer la première image restante comme principale
+        const [checkPrincipale] = await connection.execute(
+            'SELECT COUNT(*) as count FROM images_produits WHERE produit_id = ? AND principale = 1',
+            [productId]
+        );
+
+        if (checkPrincipale[0].count === 0) {
+            const [firstImage] = await connection.execute(
+                'SELECT id FROM images_produits WHERE produit_id = ? ORDER BY ordre LIMIT 1',
+                [productId]
+            );
+
+            if (firstImage.length > 0) {
+                await connection.execute(
+                    'UPDATE images_produits SET principale = 1 WHERE id = ?',
+                    [firstImage[0].id]
+                );
+                console.log('📌 Image marquée comme principale:', firstImage[0].id);
+            }
+        }
+
+        await connection.commit();
+
+        res.json({
+            message: 'Image supprimée avec succès',
+            productId: productId,
+            imageId: imageId
+        });
+
+    } catch (error) {
+        await connection.rollback();
+        console.error('Erreur suppression image produit:', error);
+        res.status(500).json({
+            error: 'Erreur lors de la suppression de l\'image',
+            details: error.message
+        });
+    } finally {
+        connection.release();
+    }
+});
+
 module.exports = router;

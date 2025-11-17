@@ -88,7 +88,7 @@ class UserNotificationService {
       type: 'produit',
       category: 'new_product',
       title: `Nouveau produit de ${supplierName}`,
-      message: `${productName} - ${price}€`,
+      message: `${productName} - ${price}FCFA`,
       priority: 'medium',
       data: productData,
       relatedProductId: productId
@@ -104,7 +104,7 @@ class UserNotificationService {
       type: 'produit',
       category: 'price_change',
       title: `Prix modifié: ${productName}`,
-      message: `${oldPrice}€ → ${newPrice}€ par ${supplierName}`,
+      message: `${oldPrice}FCFA → ${newPrice}FCFA par ${supplierName}`,
       priority: 'medium',
       data: productData,
       relatedProductId: productId

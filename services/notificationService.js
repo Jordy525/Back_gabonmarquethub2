@@ -79,7 +79,7 @@ class NotificationService {
       type: 'product_management',
       category: 'product_moderation',
       title: 'Nouveau produit à modérer',
-      message: `Produit "${nom}" (${prix_unitaire}€) nécessite une modération`,
+      message: `Produit "${nom}" (${prix_unitaire}FCFA) nécessite une modération`,
       priority: 'medium',
       data: { product: productData },
       productId: id
@@ -140,7 +140,7 @@ class NotificationService {
       type: 'order_management',
       category: 'order_issue',
       title: 'Commande en attente',
-      message: `Commande #${id} (${total}€) - Statut: ${status}`,
+      message: `Commande #${id} (${total}FCFA) - Statut: ${status}`,
       priority: 'high',
       data: orderData,
       orderId: id,

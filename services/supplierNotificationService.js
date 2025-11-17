@@ -162,7 +162,7 @@ class SupplierNotificationService {
       type: 'commande',
       category: 'new_order',
       title: `🛒 Nouvelle commande de ${buyerName}`,
-      message: `${productCount} produit(s) - Total: ${total}€`,
+      message: `${productCount} produit(s) - Total: ${total}FCFA`,
       priority: 'high',
       data: orderData,
       relatedOrderId: orderId
