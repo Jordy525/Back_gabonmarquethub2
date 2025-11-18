@@ -4,62 +4,30 @@ const db = require('../config/database');
 
 class EmailService {
     constructor() {
-        // Debug des variables d'environnement (masquées)
-        const emailHost = process.env.EMAIL_HOST || 'smtp.gmail.com';
-        const emailPort = parseInt(process.env.EMAIL_PORT, 10) || 587;
-        const emailUser = process.env.EMAIL_USER || null;
-        const emailPasswordRaw = process.env.EMAIL_PASSWORD || '';
-
-        // Sanitize password: remove accidental spaces/newlines introduced when setting env vars
-        const emailPassword = emailPasswordRaw.replace(/\s+/g, '');
-
+        // Debug des variables d'environnement
         console.log('🔧 [EmailService] Configuration SMTP:');
-        console.log('  - EMAIL_HOST:', emailHost);
-        console.log('  - EMAIL_PORT:', emailPort);
-        console.log('  - EMAIL_USER:', emailUser ? '***configuré***' : 'NON CONFIGURÉ');
-        console.log('  - EMAIL_PASSWORD:', emailPassword ? '***configuré***' : 'NON CONFIGURÉ');
-
+        console.log('  - EMAIL_HOST:', process.env.EMAIL_HOST || 'smtp.gmail.com');
+        console.log('  - EMAIL_PORT:', process.env.EMAIL_PORT || 587);
+        console.log('  - EMAIL_USER:', process.env.EMAIL_USER ? '***configuré***' : 'NON CONFIGURÉ');
+        console.log('  - EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? '***configuré***' : 'NON CONFIGURÉ');
+        
         // Vérifier que les variables sont définies
-        if (!emailUser || !emailPassword) {
-            console.error('❌ [EmailService] Variables EMAIL manquantes ou invalides!');
-            console.error('   EMAIL_USER:', emailUser ? 'OK' : 'MANQUANT');
-            console.error('   EMAIL_PASSWORD:', emailPassword ? 'OK' : 'MANQUANT');
+        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
+            console.error('❌ [EmailService] Variables EMAIL manquantes!');
+            console.error('   EMAIL_USER:', process.env.EMAIL_USER ? 'OK' : 'MANQUANT');
+            console.error('   EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? 'OK' : 'MANQUANT');
         }
-
-        // Configuration du transporteur email avec timeouts et pooling pour production
+        
+        // Configuration du transporteur email
         this.transporter = nodemailer.createTransport({
-            host: emailHost,
-            port: emailPort,
-            secure: emailPort === 465, // true for 465, false for other ports (STARTTLS)
+            host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.EMAIL_PORT) || 587,
+            secure: false,
             auth: {
-                user: emailUser,
-                pass: emailPassword
-            },
-            pool: true,
-            maxConnections: 5,
-            maxMessages: 100,
-            // Connexion/timeouts pour diagnostiquer plus proprement
-            connectionTimeout: 10000, // 10s
-            greetingTimeout: 10000,
-            socketTimeout: 10000,
-            tls: {
-                // Allow self-signed if any intermediary (not recommended in prod)
-                rejectUnauthorized: false
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD
             }
         });
-
-        // Exposer host/port pour faciliter le logging d'erreurs
-        this.emailHost = emailHost;
-        this.emailPort = emailPort;
-
-        // Vérifier la connexion SMTP au démarrage pour obtenir un diagnostic immédiat
-        this.transporter.verify()
-            .then(() => {
-                console.log('✅ [EmailService] SMTP ready — connexion OK');
-            })
-            .catch((err) => {
-                console.error('❌ [EmailService] SMTP verify failed:', err && err.message ? err.message : err);
-            });
     }
 
     // Générer un token de vérification
@@ -429,12 +397,6 @@ class EmailService {
 
         } catch (error) {
             console.error('Erreur envoi email:', error);
-            try {
-                console.error(`   SMTP host: ${this.emailHost}, port: ${this.emailPort}`);
-                if (error && error.code) console.error('   SMTP error code:', error.code);
-            } catch (e) {
-                // ignore
-            }
 
 
             // Marquer comme échoué
