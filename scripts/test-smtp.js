@@ -46,8 +46,8 @@ socket.on('error', (err) => {
     process.exit(1);
 });
 
-socket.setTimeout(5000, () => {
-    console.error(`   ❌ Timeout lors de la connexion réseau (5s)`);
+socket.setTimeout(30000, () => {
+    console.error(`   ❌ Timeout lors de la connexion réseau (30s)`);
     socket.destroy();
     process.exit(1);
 });
@@ -74,9 +74,9 @@ async function testSMTP() {
         tls: {
             rejectUnauthorized: false
         },
-        connectionTimeout: 30000,
-        greetingTimeout: 30000,
-        socketTimeout: 30000
+        connectionTimeout: 60000,
+        greetingTimeout: 60000,
+        socketTimeout: 60000
     });
 
     try {

@@ -40,9 +40,9 @@ class EmailService {
             maxMessages: 50,
             maxIdleTime: 30000, // 30s avant fermeture connexion idle
             // Timeouts plus généreux pour éviter les faux timeouts
-            connectionTimeout: 30000, // 30s pour établir la connexion
-            greetingTimeout: 30000,   // 30s pour le greeting SMTP
-            socketTimeout: 30000,     // 30s pour les données
+            connectionTimeout: 60000, // 60s pour établir la connexion
+            greetingTimeout: 60000,   // 60s pour le greeting SMTP
+            socketTimeout: 60000,     // 60s pour les données
             // TLS/SSL options
             tls: {
                 rejectUnauthorized: false
