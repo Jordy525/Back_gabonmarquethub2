@@ -4,30 +4,63 @@ const db = require('../config/database');
 
 class EmailService {
     constructor() {
-        // Debug des variables d'environnement
+        // Debug des variables d'environnement (masquées)
+        const emailHost = process.env.EMAIL_HOST || 'smtp.gmail.com';
+        const emailPort = parseInt(process.env.EMAIL_PORT, 10) || 587;
+        const emailUser = process.env.EMAIL_USER || null;
+        const emailPasswordRaw = process.env.EMAIL_PASSWORD || '';
+
+        // Sanitize password: remove accidental spaces/newlines introduced when setting env vars
+        const emailPassword = emailPasswordRaw.replace(/\s+/g, '');
+
         console.log('🔧 [EmailService] Configuration SMTP:');
-        console.log('  - EMAIL_HOST:', process.env.EMAIL_HOST || 'smtp.gmail.com');
-        console.log('  - EMAIL_PORT:', process.env.EMAIL_PORT || 587);
-        console.log('  - EMAIL_USER:', process.env.EMAIL_USER ? '***configuré***' : 'NON CONFIGURÉ');
-        console.log('  - EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? '***configuré***' : 'NON CONFIGURÉ');
-        
+        console.log('  - EMAIL_HOST:', emailHost);
+        console.log('  - EMAIL_PORT:', emailPort);
+        console.log('  - EMAIL_USER:', emailUser ? '***configuré***' : 'NON CONFIGURÉ');
+        console.log('  - EMAIL_PASSWORD:', emailPassword ? '***configuré***' : 'NON CONFIGURÉ');
+
         // Vérifier que les variables sont définies
-        if (!process.env.EMAIL_USER || !process.env.EMAIL_PASSWORD) {
-            console.error('❌ [EmailService] Variables EMAIL manquantes!');
-            console.error('   EMAIL_USER:', process.env.EMAIL_USER ? 'OK' : 'MANQUANT');
-            console.error('   EMAIL_PASSWORD:', process.env.EMAIL_PASSWORD ? 'OK' : 'MANQUANT');
+        if (!emailUser || !emailPassword) {
+            console.error('❌ [EmailService] Variables EMAIL manquantes ou invalides!');
+            console.error('   EMAIL_USER:', emailUser ? 'OK' : 'MANQUANT');
+            console.error('   EMAIL_PASSWORD:', emailPassword ? 'OK' : 'MANQUANT');
         }
-        
-        // Configuration du transporteur email
+
+        // Configuration du transporteur email avec timeouts et pooling pour production
         this.transporter = nodemailer.createTransport({
-            host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-            port: parseInt(process.env.EMAIL_PORT) || 587,
-            secure: false,
+            host: emailHost,
+            port: emailPort,
+            secure: emailPort === 465 || process.env.EMAIL_SECURE === 'true', // TLS pour 465
             auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASSWORD
+                user: emailUser,
+                pass: emailPassword
+            },
+            pool: true,
+            maxConnections: 3,
+            maxMessages: 50,
+            maxIdleTime: 30000, // 30s avant fermeture connexion idle
+            // Timeouts plus généreux pour éviter les faux timeouts
+            connectionTimeout: 30000, // 30s pour établir la connexion
+            greetingTimeout: 30000,   // 30s pour le greeting SMTP
+            socketTimeout: 30000,     // 30s pour les données
+            // TLS/SSL options
+            tls: {
+                rejectUnauthorized: false
             }
         });
+
+        // Exposer host/port pour faciliter le logging d'erreurs
+        this.emailHost = emailHost;
+        this.emailPort = emailPort;
+
+        // Vérifier la connexion SMTP au démarrage pour obtenir un diagnostic immédiat
+        this.transporter.verify()
+            .then(() => {
+                console.log('✅ [EmailService] SMTP ready — connexion OK');
+            })
+            .catch((err) => {
+                console.error('❌ [EmailService] SMTP verify failed:', err && err.message ? err.message : err);
+            });
     }
 
     // Générer un token de vérification
@@ -359,6 +392,42 @@ class EmailService {
         return await this.sendEmail(user.id, user.email, subject, content, 'document_validation');
     }
 
+    // Attendre avec délai exponentiel (pour les retries)
+    async _delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Envoyer un email avec retry automatique
+    async _sendWithRetry(mailOptions, maxRetries = 3) {
+        let lastError = null;
+        
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                console.log(`📧 [EmailService] Tentative ${attempt + 1}/${maxRetries} vers ${mailOptions.to}`);
+                const info = await this.transporter.sendMail(mailOptions);
+                console.log(`✅ [EmailService] Email envoyé avec succès - MessageId: ${info.messageId}`);
+                return info;
+            } catch (error) {
+                lastError = error;
+                console.error(`❌ [EmailService] Tentative ${attempt + 1} échouée:`, error && error.message ? error.message : error);
+                
+                if (error && error.code) {
+                    console.error(`   Code erreur SMTP: ${error.code}`);
+                }
+                
+                // Si c'est la dernière tentative, ne pas attendre
+                if (attempt < maxRetries - 1) {
+                    const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+                    console.log(`⏳ [EmailService] Nouvelle tentative dans ${delayMs}ms...`);
+                    await this._delay(delayMs);
+                }
+            }
+        }
+        
+        // Toutes les tentatives ont échoué
+        throw lastError || new Error('Impossible d\'envoyer l\'email après retries');
+    }
+
     // Méthode générique pour envoyer un email
     async sendEmail(userId, to, subject, htmlContent, type) {
         let notificationId = null;
@@ -375,29 +444,36 @@ class EmailService {
             // Créer la notification en base
             notificationId = await this.createEmailNotification(userId, type, subject, htmlContent);
 
-            // Envoyer l'email
-            const info = await this.transporter.sendMail({
-
+            // Préparer les options d'email
+            const mailOptions = {
                 from: `"GabMarketHub" <${process.env.EMAIL_USER}>`,
                 to: to,
                 subject: subject,
                 html: htmlContent
-            });
+            };
+
+            // Envoyer avec retry automatique
+            const info = await this._sendWithRetry(mailOptions, 3);
 
             // Marquer comme envoyé
-            await db.execute(`
-                UPDATE email_notifications 
-                SET statut_envoi = 'sent', date_envoi = NOW()
-                WHERE id = ?
-            `, [notificationId]);
-
-            console.log('Email envoyé:', info.messageId);
+            if (notificationId) {
+                await db.execute(`
+                    UPDATE email_notifications 
+                    SET statut_envoi = 'sent', date_envoi = NOW()
+                    WHERE id = ?
+                `, [notificationId]);
+            }
 
             return { success: true, messageId: info.messageId };
 
         } catch (error) {
-            console.error('Erreur envoi email:', error);
-
+            console.error('❌ [EmailService] Erreur finale après retries:', error && error.message ? error.message : error);
+            try {
+                console.error(`   SMTP: ${this.emailHost}:${this.emailPort}`);
+                if (error && error.code) console.error('   Code erreur:', error.code);
+            } catch (e) {
+                // ignore
+            }
 
             // Marquer comme échoué
             if (notificationId) {
@@ -405,10 +481,10 @@ class EmailService {
                     UPDATE email_notifications 
                     SET statut_envoi = 'failed', erreur_envoi = ?, tentatives = tentatives + 1
                     WHERE id = ?
-                `, [error.message, notificationId]);
+                `, [error && error.message ? error.message : String(error), notificationId]);
             }
 
-            return { success: false, error: error.message };
+            return { success: false, error: error && error.message ? error.message : String(error) };
         }
     }
 
